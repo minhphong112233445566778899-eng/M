@@ -1,3 +1,11 @@
+# Railway deployment notes:
+# - This file's values are local-dev defaults. On Railway, override the
+#   sensitive/environment-specific ones via service Variables instead of
+#   editing this file -- Lavalink (Spring Boot) reads matching environment
+#   variables and they take precedence over what's written here:
+#     SERVER_PORT                -> server.port
+#     LAVALINK_SERVER_PASSWORD   -> lavalink.server.password
+# - See ../RAILWAY.md for the full setup walkthrough.
 server:
   port: 2333
   address: 0.0.0.0
