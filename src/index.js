@@ -13,6 +13,8 @@ const client = new Client({
 
 client.commands = new Collection();
 client.npIntervals = new Map();
+client.errorCounts = new Map(); // guildId -> consecutive failed-track count
+client.retriedTracks = new Map(); // guildId -> Set of track identifiers already retried once
 
 const commandFiles = fs
   .readdirSync(path.join(__dirname, "commands"))
@@ -157,6 +159,8 @@ function clearNpInterval(guildId) {
 client.lavalink.on("trackStart", async (player, track) => {
   console.log(`[Lavalink] Track started: ${track.info.title} in guild ${player.guildId}`);
   clearNpInterval(player.guildId);
+  client.errorCounts.set(player.guildId, 0);
+  client.retriedTracks.delete(player.guildId);
 
   const channel = client.channels.cache.get(player.textChannelId);
   if (!channel) return;
@@ -190,11 +194,97 @@ client.lavalink.on("trackEnd", (player, track) => {
   if (player.get("autoplay")) handleAutoplay(player, track);
 });
 
-client.lavalink.on("trackError", (player, track, payload) => {
-  console.error(`[Lavalink] Track error in guild ${player.guildId}:`, payload?.exception || payload);
+client.lavalink.on("trackError", async (player, track, payload) => {
+  const guildId = player.guildId;
+  const reason =
+    payload?.exception?.message || payload?.exception?.cause || "Unknown error";
+  console.error(`[Lavalink] Track error in guild ${guildId}:`, reason);
+  clearNpInterval(guildId);
+
+  const channel = client.channels.cache.get(player.textChannelId);
+
+  // Circuit breaker: if many tracks in a row fail (e.g. YouTube auth/cookies are
+  // broken on this node), stop instead of silently burning through the whole queue.
+  const failCount = (client.errorCounts.get(guildId) || 0) + 1;
+  client.errorCounts.set(guildId, failCount);
+  if (failCount >= 5) {
+    client.errorCounts.set(guildId, 0);
+    if (channel)
+      channel
+        .send(
+          "⚠️ 5 tracks in a row failed to play (likely a YouTube auth/cookie issue on the node). Stopping playback — check the bot logs."
+        )
+        .catch(() => {});
+    await player.stopPlaying(true).catch(() => {});
+    return;
+  }
+
+  // Try once to re-resolve the SAME track via a fresh search before giving up on it.
+  // Lavalink had already "downloaded"/resolved this exact track object, but that
+  // resolution (stream URL, cipher, etc.) can be stale or blocked; searching again
+  // often returns a working source instead.
+  const trackKey = track?.info?.identifier || track?.encoded;
+  let retriedSet = client.retriedTracks.get(guildId);
+  if (!retriedSet) {
+    retriedSet = new Set();
+    client.retriedTracks.set(guildId, retriedSet);
+  }
+
+  if (track && trackKey && !retriedSet.has(trackKey)) {
+    retriedSet.add(trackKey);
+    const replacement = await searchReplacementTrack(player, track);
+    if (replacement) {
+      console.log(`[Lavalink] Retrying "${track.info.title}" via fresh search after error.`);
+      player.queue.tracks.unshift(replacement);
+      await player.skip(0, false).catch((err) =>
+        console.error("[Lavalink] skip-to-retry failed:", err.message)
+      );
+      return;
+    }
+  }
+
+  if (channel)
+    channel
+      .send(`⚠️ Couldn't play **${track?.info?.title || "that track"}**: ${reason}. Skipping...`)
+      .catch(() => {});
+
+  // This is the critical fix: lavalink-client only auto-advances the queue on
+  // trackEnd/trackStuck, NOT on trackError, so without an explicit skip() here
+  // the player just sits idle forever and the rest of the queue never plays.
+  await player.skip(0, false).catch((err) => {
+    console.error("[Lavalink] skip-after-error failed:", err.message);
+    player.stopPlaying(true).catch(() => {});
+  });
+});
+
+async function searchReplacementTrack(player, failedTrack) {
+  try {
+    const query = `${failedTrack.info.title} ${failedTrack.info.author || ""}`.trim();
+    const res = await player.search(
+      { query, source: "ytmsearch" },
+      failedTrack.requester
+    );
+    if (!res?.tracks?.length) return null;
+    const targetDuration = failedTrack.info.duration || 0;
+    return (
+      res.tracks.find(
+        (t) => Math.abs((t.info.duration || 0) - targetDuration) < 5000
+      ) || res.tracks[0]
+    );
+  } catch (err) {
+    console.error("[Lavalink] searchReplacementTrack failed:", err.message);
+    return null;
+  }
+}
+
+client.lavalink.on("trackStuck", (player, track) => {
+  console.warn(`[Lavalink] Track stuck in guild ${player.guildId}: ${track?.info?.title}`);
   clearNpInterval(player.guildId);
   const channel = client.channels.cache.get(player.textChannelId);
-  if (channel) channel.send(`⚠️ Error playing **${track?.info?.title || "unknown"}**: ${payload?.exception?.message || "Unknown error"}`);
+  if (channel)
+    channel
+      .send(`⚠️ **${track?.info?.title || "Track"}** got stuck and was skipped.`)
+      .catch(() => {});
 });
 
 client.lavalink.on("playerSocketClosed", (player, payload) => {

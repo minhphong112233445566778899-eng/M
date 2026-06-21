@@ -4,7 +4,7 @@ server:
 
 lavalink:
   plugins:
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.11.2"
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
       repository: "https://maven.lavalink.dev/releases"
       snapshot: false
     - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.2.0"
@@ -46,11 +46,34 @@ plugins:
     allowSearch: true
     allowDirectVideoIds: true
     allowDirectPlaylistIds: true
+    # NOTE: ANDROID_TESTSUITE and TVHTML5EMBEDDED were removed/renamed upstream and
+    # silently failed to load on this plugin version, causing extra track failures.
     clients:
       - MUSIC
-      - ANDROID_TESTSUITE
       - WEB
-      - TVHTML5EMBEDDED
+      - MWEB
+      - WEBEMBEDDED
+      - ANDROID_VR
+      - TVHTML5_SIMPLY
+    # This is the "login with cookies" equivalent for this plugin: instead of raw
+    # browser cookies, youtube-source uses YouTube's official OAuth device flow so
+    # requests are attributed to a logged-in account instead of a signed-out client,
+    # which avoids most "Sign in to confirm you're not a bot" failures.
+    #
+    # Setup (do this once, locally or by watching this node's logs after deploy):
+    #   1. Set enabled: true (below) and leave refreshToken commented out.
+    #   2. Start/redeploy Lavalink and watch the logs. It will print a URL
+    #      (https://www.google.com/device) and a short code.
+    #   3. On any browser, open that URL and enter the code, then approve with a
+    #      YouTube/Google account. STRONGLY prefer a separate "burner" account,
+    #      not your main one — Google can flag/restrict accounts used this way.
+    #   4. The log will then print a refreshToken. Copy it into refreshToken below,
+    #      uncomment it, and set skipInitialization: true so it doesn't redo the
+    #      device flow on every restart. Redeploy.
+    oauth:
+      enabled: true
+      # refreshToken: "paste the refresh token printed in the logs here"
+      # skipInitialization: true
   lavasrc:
     providers:
       - "ytsearch:\"%ISRC%\""
