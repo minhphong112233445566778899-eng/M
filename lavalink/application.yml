@@ -82,6 +82,11 @@ plugins:
       enabled: true
       # refreshToken: "paste the refresh token printed in the logs here"
       # skipInitialization: true
+    # Cookie-based login (alternative / complement to OAuth above).
+    # Paste your Netscape cookies into lavalink/cookies.txt and they will be
+    # baked into the Docker image and loaded here on startup.
+    pot:
+      cookiePath: "/opt/Lavalink/cookies.txt"
   lavasrc:
     providers:
       - "ytsearch:\"%ISRC%\""
