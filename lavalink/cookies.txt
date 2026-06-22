@@ -1,0 +1,18 @@
+# Netscape HTTP Cookie File
+# How to export your cookies:
+#   1. Install the browser extension "Get cookies.txt LOCALLY" (Chrome/Firefox)
+#   2. Go to https://www.youtube.com and make sure you're signed in
+#      (use a BURNER account, not your main Google account)
+#   3. Click the extension -> Export cookies for this tab
+#   4. Copy everything it gives you and paste it below this comment block,
+#      replacing the example line.
+#
+# Format (tab-separated):
+# domain  includeSubdomains  path  secure  expiry  name  value
+#
+# Example (do NOT leave this line in when you paste your real cookies):
+# .youtube.com	TRUE	/	TRUE	1999999999	EXAMPLE_COOKIE	EXAMPLE_VALUE
+#
+# Paste your real cookies below this line:
+# --------------------------------------------------------------------
+
