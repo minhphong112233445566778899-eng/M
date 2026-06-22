@@ -162,6 +162,12 @@ client.lavalink.on("trackStart", async (player, track) => {
   client.errorCounts.set(player.guildId, 0);
   client.retriedTracks.delete(player.guildId);
 
+  // Auto-update voice channel status with the current song
+  const voiceChannel = client.channels.cache.get(player.voiceChannelId);
+  if (voiceChannel?.setStatus) {
+    voiceChannel.setStatus(`🎵 ${track.info.title}`).catch(() => {});
+  }
+
   const channel = client.channels.cache.get(player.textChannelId);
   if (!channel) return;
 
@@ -293,6 +299,9 @@ client.lavalink.on("playerSocketClosed", (player, payload) => {
 
 client.lavalink.on("queueEnd", (player) => {
   clearNpInterval(player.guildId);
+  // Clear the voice channel status when playback stops
+  const voiceChannel = client.channels.cache.get(player.voiceChannelId);
+  if (voiceChannel?.setStatus) voiceChannel.setStatus("").catch(() => {});
   if (player.get("autoplay")) return;
   const channel = client.channels.cache.get(player.textChannelId);
   if (channel) channel.send("Queue finished. Use `/play` to add more tracks.");
