@@ -8,7 +8,6 @@ const {
 } = require("discord.js");
 
 const PAGE_SIZE = 8;
-const MAX_TITLE = 35;
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -27,20 +26,34 @@ module.exports = {
     const totalPages = Math.max(1, Math.ceil(tracks.length / PAGE_SIZE));
     let page = 0;
 
-    const truncate = (str, max) =>
-      str.length > max ? str.slice(0, max - 1) + "…" : str;
-
-    const buildEmbed = (p) => {
+    const buildUpNextValue = (p) => {
       const slice = tracks.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE);
-      const lines = slice.map((t, i) => {
+      if (!slice.length) return "Nothing queued.";
+
+      let result = "";
+      for (let i = 0; i < slice.length; i++) {
+        const t = slice[i];
         const num = p * PAGE_SIZE + i + 1;
         const dur = t.info.isStream ? "🔴 LIVE" : formatDuration(t.info.duration);
-        const title = truncate(t.info.title, MAX_TITLE);
-        // Use plain text title (no hyperlink) to keep line length predictable
-        return `\`${num}.\` **${title}** — ${dur}`;
-      });
+        // No hyperlinks in list — just plain bold title, truncated hard at 30 chars
+        const title = t.info.title.length > 30
+          ? t.info.title.slice(0, 29) + "…"
+          : t.info.title;
+        const line = `\`${num}.\` **${title}** — ${dur}\n`;
+        // Hard stop before we hit Discord's 1024 field limit
+        if (result.length + line.length > 1000) {
+          result += `*...and more*`;
+          break;
+        }
+        result += line;
+      }
+      return result.trim();
+    };
 
-      const currentTitle = truncate(current.info.title, MAX_TITLE);
+    const buildEmbed = (p) => {
+      const currentTitle = current.info.title.length > 40
+        ? current.info.title.slice(0, 39) + "…"
+        : current.info.title;
       const currentDur = current.info.isStream
         ? "🔴 LIVE"
         : formatDuration(current.info.duration);
@@ -55,7 +68,7 @@ module.exports = {
           },
           {
             name: `Up Next — ${tracks.length} track${tracks.length !== 1 ? "s" : ""}`,
-            value: lines.length ? lines.join("\n") : "Nothing queued.",
+            value: buildUpNextValue(p),
           }
         )
         .setFooter({ text: `Page ${p + 1} / ${totalPages}` });
