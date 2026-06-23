@@ -28,7 +28,7 @@ module.exports = {
         if (!vc) return;
         if (vc.members.filter((m) => !m.user.bot).size === 0) {
           // Clear status before leaving
-          await client.rest.patch(`/channels/${p.voiceChannelId}`, {
+          await client.rest.put(`/channels/${p.voiceChannelId}/voice-status`, {
             body: { status: "" },
           }).catch(() => {});
           await p.destroy();
