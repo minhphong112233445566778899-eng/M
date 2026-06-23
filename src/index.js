@@ -124,22 +124,12 @@ client.lavalink.on("debug", (eventName, eventData) => {
 async function setVoiceChannelStatus(channelId, status) {
   if (!channelId) return;
   try {
-    const res = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
-      method: "PATCH",
-      headers: {
-        Authorization: `Bot ${process.env.DISCORD_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ status }),
+    await client.rest.put(`/channels/${channelId}/voice-status`, {
+      body: { status },
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.error(`[ChannelStatus] ❌ HTTP ${res.status}:`, JSON.stringify(err));
-    } else {
-      console.log(`[ChannelStatus] ✅ Set "${status}" on channel ${channelId}`);
-    }
+    console.log(`[ChannelStatus] ✅ Set "${status}" on channel ${channelId}`);
   } catch (err) {
-    console.error("[ChannelStatus] ❌ fetch failed:", err.message);
+    console.error(`[ChannelStatus] ❌ HTTP ${err.status} code=${err.code}: ${err.message}`);
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
