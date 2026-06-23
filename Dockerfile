@@ -1,12 +1,9 @@
 FROM node:22-alpine
-# cache-bust: 2026-06-23
-RUN npm install -g pnpm
-
+# cache-bust: 2026-06-23b
 WORKDIR /app
 
-# Copy lockfile + manifest first so this layer is cached unless deps change
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --prod --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm install --omit=dev
 
 COPY src ./src
 
