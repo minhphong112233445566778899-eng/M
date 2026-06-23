@@ -194,8 +194,9 @@ client.lavalink.on("trackStart", async (player, track) => {
 
 client.lavalink.on("trackEnd", (player, track) => {
   clearNpInterval(player.guildId);
-  // Store the last played track so queueEnd can use it for autoplay
-  player.set("lastTrack", track);
+  // Note: no longer manually storing lastTrack here.
+  // lavalink-client pushes the finished track into player.queue.previous automatically,
+  // so queueEnd reads it from there instead.
 });
 
 client.lavalink.on("trackError", async (player, track, payload) => {
@@ -301,8 +302,14 @@ client.lavalink.on("queueEnd", (player) => {
   if (voiceChannel?.setStatus) voiceChannel.setStatus("").catch(() => {});
 
   if (player.get("autoplay")) {
-    const lastTrack = player.get("lastTrack");
-    if (lastTrack) return handleAutoplay(player, lastTrack);
+    // lavalink-client pushes the last-played track into queue.previous automatically
+    const seed = player.queue.previous[0];
+    console.log(`[Autoplay] queueEnd fired, seed track: ${seed?.info?.title || "NONE"}`);
+    if (seed) {
+      handleAutoplay(player, seed);
+      return;
+    }
+    console.warn("[Autoplay] No previous track found to seed autoplay.");
   }
 
   const channel = client.channels.cache.get(player.textChannelId);
@@ -311,13 +318,24 @@ client.lavalink.on("queueEnd", (player) => {
 
 async function handleAutoplay(player, lastTrack) {
   try {
-    const query = `${lastTrack.info.title} ${lastTrack.info.author}`;
+    const query = `${lastTrack.info.title} ${lastTrack.info.author || ""}`.trim();
+    console.log(`[Autoplay] Searching for: "${query}"`);
     const res = await player.search({ query, source: "ytmsearch" }, client.user);
-    if (!res?.tracks?.length) return;
-    const track = res.tracks[Math.floor(Math.random() * Math.min(res.tracks.length, 5))];
+    if (!res?.tracks?.length) {
+      console.warn("[Autoplay] Search returned no results.");
+      return;
+    }
+    // Pick randomly from top 5, but exclude the exact same track
+    const candidates = res.tracks
+      .slice(0, 5)
+      .filter((t) => t.info.identifier !== lastTrack.info.identifier);
+    const track = candidates[Math.floor(Math.random() * candidates.length)] || res.tracks[0];
+    console.log(`[Autoplay] Queuing: "${track.info.title}"`);
     player.queue.add(track);
     if (!player.playing) await player.play();
-  } catch {}
+  } catch (err) {
+    console.error("[Autoplay] Error:", err.message);
+  }
 }
 
 client.on("raw", (d) => {
