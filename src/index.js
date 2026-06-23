@@ -36,6 +36,9 @@ client.lavalink = new LavalinkManager({
       retryAmount: 20,
       retryDelay: 2500,
       requestSignalTimeoutMS: 30000,
+      // Buffer & heartbeat tuning
+      heartBeatInterval: 30000,     // ping node every 30s to keep connection alive
+      enablePingOnStatsCheck: true, // verify node is reachable before sending requests
     },
     {
       id: "serenetia",
@@ -46,6 +49,8 @@ client.lavalink = new LavalinkManager({
       retryAmount: 20,
       retryDelay: 2500,
       requestSignalTimeoutMS: 30000,
+      heartBeatInterval: 30000,
+      enablePingOnStatsCheck: true,
     },
     {
       id: "custom",
@@ -56,6 +61,8 @@ client.lavalink = new LavalinkManager({
       retryAmount: 10,
       retryDelay: 5000,
       requestSignalTimeoutMS: 30000,
+      heartBeatInterval: 30000,
+      enablePingOnStatsCheck: true,
     },
   ],
   sendToShard: (guildId, payload) => {
@@ -76,12 +83,23 @@ client.lavalink = new LavalinkManager({
     onEmptyQueue: {
       destroyAfterMs: 30000,
     },
+    // Prevent the player from being destroyed mid-track on transient errors
+    applyVolumeAsFilter: false,
+    clientBasedPositionUpdateInterval: 100, // smooth position updates every 100ms
   },
   queueOptions: {
     maxPreviousTracks: 10,
   },
   advancedOptions: {
     enableDebugEvents: true,
+    // Use lavalink node's built-in audio frame buffer to absorb network jitter
+    // This tells lavalink to buffer 400ms of audio ahead before starting playback
+    maxFilterFixDuration: 600,
+    debugOptions: {
+      noAudio: {
+        toggleSleepOnInactivity: false, // keep the connection warm even when idle
+      },
+    },
   },
 });
 
