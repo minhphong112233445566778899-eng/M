@@ -14,8 +14,8 @@ const client = new Client({
 
 client.commands = new Collection();
 client.npIntervals = new Map();
-client.errorCounts = new Map(); // guildId -> consecutive failed-track count
-client.retriedTracks = new Map(); // guildId -> Set of track identifiers already retried once
+client.errorCounts = new Map();
+client.retriedTracks = new Map();
 
 const commandFiles = fs
   .readdirSync(path.join(__dirname, "commands"))
@@ -118,6 +118,18 @@ client.lavalink.on("debug", (eventName, eventData) => {
   }
 });
 
+// ─── FIX: single shared helper that uses the REST API ────────────────────────
+// discord.js has no channel.setStatus() method — it must be called via REST.
+async function setVoiceChannelStatus(channelId, status) {
+  try {
+    await client.rest.patch(`/channels/${channelId}`, { body: { status } });
+    console.log(`[ChannelStatus] Set "${status}" on channel ${channelId}`);
+  } catch (err) {
+    console.error("[ChannelStatus] Failed to set status:", err.message);
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function buildNowPlayingEmbed(player, track) {
   const position = player.position;
   const duration = track.info.duration;
@@ -163,10 +175,9 @@ client.lavalink.on("trackStart", async (player, track) => {
   client.errorCounts.set(player.guildId, 0);
   client.retriedTracks.delete(player.guildId);
 
-  // Auto-update voice channel status with the current song
-  const voiceChannel = client.channels.cache.get(player.voiceChannelId);
-  if (voiceChannel?.setStatus) {
-    voiceChannel.setStatus(`🎵 ${track.info.title}`).catch(() => {});
+  // FIX: auto-set voice channel status using REST (not the non-existent setStatus())
+  if (player.voiceChannelId) {
+    await setVoiceChannelStatus(player.voiceChannelId, `🎵 ${track.info.title}`);
   }
 
   const channel = client.channels.cache.get(player.textChannelId);
@@ -182,22 +193,19 @@ client.lavalink.on("trackStart", async (player, track) => {
   if (!track.info.isStream) {
     const iv = setInterval(async () => {
       const p = client.lavalink.getPlayer(player.guildId);
-      if (!p || !p.queue.current || p.paused) return; // don't edit while paused
+      if (!p || !p.queue.current || p.paused) return;
       try {
         await npMessage.edit({ embeds: [buildNowPlayingEmbed(p, p.queue.current)] });
       } catch {
         clearNpInterval(player.guildId);
       }
-    }, 10000); // 10s — fast enough to feel live, safe from Discord's rate limit
+    }, 10000);
     client.npIntervals.set(player.guildId, iv);
   }
 });
 
-client.lavalink.on("trackEnd", (player, track) => {
+client.lavalink.on("trackEnd", (player) => {
   clearNpInterval(player.guildId);
-  // Note: no longer manually storing lastTrack here.
-  // lavalink-client pushes the finished track into player.queue.previous automatically,
-  // so queueEnd reads it from there instead.
 });
 
 client.lavalink.on("trackError", async (player, track, payload) => {
@@ -209,8 +217,6 @@ client.lavalink.on("trackError", async (player, track, payload) => {
 
   const channel = client.channels.cache.get(player.textChannelId);
 
-  // Circuit breaker: if many tracks in a row fail (e.g. YouTube auth/cookies are
-  // broken on this node), stop instead of silently burning through the whole queue.
   const failCount = (client.errorCounts.get(guildId) || 0) + 1;
   client.errorCounts.set(guildId, failCount);
   if (failCount >= 5) {
@@ -225,10 +231,6 @@ client.lavalink.on("trackError", async (player, track, payload) => {
     return;
   }
 
-  // Try once to re-resolve the SAME track via a fresh search before giving up on it.
-  // Lavalink had already "downloaded"/resolved this exact track object, but that
-  // resolution (stream URL, cipher, etc.) can be stale or blocked; searching again
-  // often returns a working source instead.
   const trackKey = track?.info?.identifier || track?.encoded;
   let retriedSet = client.retriedTracks.get(guildId);
   if (!retriedSet) {
@@ -254,9 +256,6 @@ client.lavalink.on("trackError", async (player, track, payload) => {
       .send(`⚠️ Couldn't play **${track?.info?.title || "that track"}**: ${reason}. Skipping...`)
       .catch(() => {});
 
-  // This is the critical fix: lavalink-client only auto-advances the queue on
-  // trackEnd/trackStuck, NOT on trackError, so without an explicit skip() here
-  // the player just sits idle forever and the rest of the queue never plays.
   await player.skip(0, false).catch((err) => {
     console.error("[Lavalink] skip-after-error failed:", err.message);
     player.stopPlaying(true).catch(() => {});
@@ -299,11 +298,13 @@ client.lavalink.on("playerSocketClosed", (player, payload) => {
 
 client.lavalink.on("queueEnd", (player) => {
   clearNpInterval(player.guildId);
-  const voiceChannel = client.channels.cache.get(player.voiceChannelId);
-  if (voiceChannel?.setStatus) voiceChannel.setStatus("").catch(() => {});
+
+  // FIX: clear voice channel status using REST when queue ends
+  if (player.voiceChannelId) {
+    setVoiceChannelStatus(player.voiceChannelId, "");
+  }
 
   if (player.get("autoplay")) {
-    // lavalink-client pushes the last-played track into queue.previous automatically
     const seed = player.queue.previous[0];
     console.log(`[Autoplay] queueEnd fired, seed track: ${seed?.info?.title || "NONE"}`);
     if (seed) {
@@ -317,8 +318,6 @@ client.lavalink.on("queueEnd", (player) => {
   if (channel) channel.send("Queue finished. Use `/play` to add more tracks.");
 });
 
-// Gemini client — only initialised if the env var is set so the bot still
-// works without it (falls back to the old title+author search).
 const gemini = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
   : null;
@@ -356,7 +355,6 @@ async function getGeminiSuggestion(lastTrack) {
 
 async function handleAutoplay(player, lastTrack) {
   try {
-    // Try Gemini first for a smart suggestion, fall back to plain search
     let query = await getGeminiSuggestion(lastTrack);
     if (!query) {
       query = `${lastTrack.info.title} ${lastTrack.info.author || ""}`.trim();
@@ -369,7 +367,6 @@ async function handleAutoplay(player, lastTrack) {
       return;
     }
 
-    // Exclude the exact same track
     const candidates = res.tracks
       .slice(0, 5)
       .filter((t) => t.info.identifier !== lastTrack.info.identifier);
