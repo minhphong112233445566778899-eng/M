@@ -7,7 +7,8 @@ const {
   ComponentType,
 } = require("discord.js");
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 8;
+const MAX_TITLE = 35;
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -26,13 +27,23 @@ module.exports = {
     const totalPages = Math.max(1, Math.ceil(tracks.length / PAGE_SIZE));
     let page = 0;
 
+    const truncate = (str, max) =>
+      str.length > max ? str.slice(0, max - 1) + "…" : str;
+
     const buildEmbed = (p) => {
       const slice = tracks.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE);
       const lines = slice.map((t, i) => {
         const num = p * PAGE_SIZE + i + 1;
         const dur = t.info.isStream ? "🔴 LIVE" : formatDuration(t.info.duration);
-        return `\`${num}.\` **[${t.info.title}](${t.info.uri})** — ${dur}`;
+        const title = truncate(t.info.title, MAX_TITLE);
+        // Use plain text title (no hyperlink) to keep line length predictable
+        return `\`${num}.\` **${title}** — ${dur}`;
       });
+
+      const currentTitle = truncate(current.info.title, MAX_TITLE);
+      const currentDur = current.info.isStream
+        ? "🔴 LIVE"
+        : formatDuration(current.info.duration);
 
       return new EmbedBuilder()
         .setColor(0xff0000)
@@ -40,9 +51,7 @@ module.exports = {
         .addFields(
           {
             name: "Now Playing",
-            value: `**[${current.info.title}](${current.info.uri})** — ${
-              current.info.isStream ? "🔴 LIVE" : formatDuration(current.info.duration)
-            }`,
+            value: `**[${currentTitle}](${current.info.uri})** — ${currentDur}`,
           },
           {
             name: `Up Next — ${tracks.length} track${tracks.length !== 1 ? "s" : ""}`,
