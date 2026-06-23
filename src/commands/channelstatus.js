@@ -18,8 +18,13 @@ module.exports = {
     if (!voiceChannel)
       return interaction.editReply("You must be in a voice channel to set its status.");
 
-    const perms = voiceChannel.permissionsFor(interaction.guild.members.me);
-    if (!perms.has(PermissionFlagsBits.ManageChannels))
+    // FIX 1: Guard against me being null (bot not cached in guild)
+    const me = interaction.guild.members.me;
+    if (!me)
+      return interaction.editReply("I couldn't resolve my own member — please try again.");
+
+    const perms = voiceChannel.permissionsFor(me);
+    if (!perms?.has(PermissionFlagsBits.ManageChannels))
       return interaction.editReply(
         "I need the **Manage Channel** permission on that voice channel to set its status."
       );
@@ -41,7 +46,14 @@ module.exports = {
 
       const track = player.queue.current;
       const status = `🎵 ${track.info.title}`;
-      await setChannelStatus(voiceChannel, status);
+
+      // FIX 2: Properly catch and report errors back to the user
+      try {
+        await setChannelStatus(voiceChannel, status);
+      } catch (err) {
+        return interaction.editReply(`❌ ${err.message}`);
+      }
+
       return interaction.editReply({
         embeds: [
           new EmbedBuilder()
@@ -53,7 +65,12 @@ module.exports = {
 
     // Empty input = clear the status
     if (!input) {
-      await setChannelStatus(voiceChannel, "");
+      try {
+        await setChannelStatus(voiceChannel, "");
+      } catch (err) {
+        return interaction.editReply(`❌ ${err.message}`);
+      }
+
       return interaction.editReply({
         embeds: [
           new EmbedBuilder()
@@ -64,7 +81,12 @@ module.exports = {
     }
 
     // Custom text
-    await setChannelStatus(voiceChannel, input);
+    try {
+      await setChannelStatus(voiceChannel, input);
+    } catch (err) {
+      return interaction.editReply(`❌ ${err.message}`);
+    }
+
     return interaction.editReply({
       embeds: [
         new EmbedBuilder()
@@ -75,10 +97,15 @@ module.exports = {
   },
 };
 
+// FIX 3: channel.setStatus() does NOT exist in discord.js — use the REST API directly.
+// Discord's PATCH /channels/{id} with a "status" field is the correct approach.
 async function setChannelStatus(channel, status) {
-  // Discord.js exposes this via channel.setStatus() in v14.14+
-  await channel.setStatus(status).catch((err) => {
+  try {
+    await channel.client.rest.patch(`/channels/${channel.id}`, {
+      body: { status },
+    });
+  } catch (err) {
     console.error("[ChannelStatus] Failed to set voice channel status:", err.message);
     throw new Error("Discord rejected the status update — check bot permissions.");
-  });
+  }
 }
