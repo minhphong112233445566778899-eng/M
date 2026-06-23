@@ -1,5 +1,4 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require("discord.js");
-const { Routes } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,7 +21,7 @@ module.exports = {
     const perms = voiceChannel.permissionsFor(interaction.guild.members.me);
     if (!perms.has(PermissionFlagsBits.ManageChannels))
       return interaction.editReply(
-        "I need the **Manage Channels** permission on that voice channel to set its status."
+        "I need the **Manage Channel** permission on that voice channel to set its status."
       );
 
     if (!interaction.memberPermissions.has(PermissionFlagsBits.ManageChannels))
@@ -41,20 +40,20 @@ module.exports = {
         );
 
       const track = player.queue.current;
-      const statusText = `🎵 ${track.info.title}`;
-      await setChannelTopic(client, voiceChannel, statusText);
+      const status = `🎵 ${track.info.title}`;
+      await setChannelStatus(voiceChannel, status);
       return interaction.editReply({
         embeds: [
           new EmbedBuilder()
             .setColor(0xff0000)
-            .setDescription(`✅ Channel status set to: **${statusText}**`),
+            .setDescription(`✅ Channel status set to: **${status}**`),
         ],
       });
     }
 
     // Empty input = clear the status
     if (!input) {
-      await setChannelTopic(client, voiceChannel, null);
+      await setChannelStatus(voiceChannel, "");
       return interaction.editReply({
         embeds: [
           new EmbedBuilder()
@@ -65,7 +64,7 @@ module.exports = {
     }
 
     // Custom text
-    await setChannelTopic(client, voiceChannel, input);
+    await setChannelStatus(voiceChannel, input);
     return interaction.editReply({
       embeds: [
         new EmbedBuilder()
@@ -76,19 +75,10 @@ module.exports = {
   },
 };
 
-/**
- * Sets the topic of a voice channel via REST API
- * @param {Client} client - The Discord client
- * @param {VoiceChannel} channel - The voice channel to update
- * @param {string|null} status - The status text or null to clear
- */
-async function setChannelTopic(client, channel, status) {
-  try {
-    await client.rest.put(Routes.channel(channel.id), {
-      body: {
-        topic: status || null,
-      },
-    });
-  } catch (err) {
-    console.error("[ChannelStatus] Failed to update voice channel via REST API:", err.message);
+async function setChannelStatus(channel, status) {
+  // Discord.js exposes this via channel.setStatus() in v14.14+
+  await channel.setStatus(status).catch((err) => {
+    console.error("[ChannelStatus] Failed to set voice channel status:", err.message);
     throw new Error("Discord rejected the status update — check bot permissions.");
+  });
+}
