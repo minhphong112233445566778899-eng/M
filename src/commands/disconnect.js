@@ -12,6 +12,13 @@ module.exports = {
     if (!player || !player.connected)
       return interaction.editReply("I'm not in a voice channel.");
 
+    // Clear voice channel status before destroying
+    if (player.voiceChannelId) {
+      await client.rest.patch(`/channels/${player.voiceChannelId}`, {
+        body: { status: "" },
+      }).catch(() => {});
+    }
+
     await player.destroy();
     await interaction.editReply("Disconnected and cleared the queue ✅");
   },
