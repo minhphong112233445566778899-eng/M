@@ -181,23 +181,21 @@ client.lavalink.on("trackStart", async (player, track) => {
   if (!track.info.isStream) {
     const iv = setInterval(async () => {
       const p = client.lavalink.getPlayer(player.guildId);
-      if (!p || !p.queue.current) {
-        clearNpInterval(player.guildId);
-        return;
-      }
+      if (!p || !p.queue.current || p.paused) return; // don't edit while paused
       try {
         await npMessage.edit({ embeds: [buildNowPlayingEmbed(p, p.queue.current)] });
       } catch {
         clearNpInterval(player.guildId);
       }
-    }, 5000);
+    }, 10000); // 10s — fast enough to feel live, safe from Discord's rate limit
     client.npIntervals.set(player.guildId, iv);
   }
 });
 
 client.lavalink.on("trackEnd", (player, track) => {
   clearNpInterval(player.guildId);
-  if (player.get("autoplay")) handleAutoplay(player, track);
+  // Store the last played track so queueEnd can use it for autoplay
+  player.set("lastTrack", track);
 });
 
 client.lavalink.on("trackError", async (player, track, payload) => {
@@ -299,10 +297,14 @@ client.lavalink.on("playerSocketClosed", (player, payload) => {
 
 client.lavalink.on("queueEnd", (player) => {
   clearNpInterval(player.guildId);
-  // Clear the voice channel status when playback stops
   const voiceChannel = client.channels.cache.get(player.voiceChannelId);
   if (voiceChannel?.setStatus) voiceChannel.setStatus("").catch(() => {});
-  if (player.get("autoplay")) return;
+
+  if (player.get("autoplay")) {
+    const lastTrack = player.get("lastTrack");
+    if (lastTrack) return handleAutoplay(player, lastTrack);
+  }
+
   const channel = client.channels.cache.get(player.textChannelId);
   if (channel) channel.send("Queue finished. Use `/play` to add more tracks.");
 });
