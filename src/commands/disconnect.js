@@ -14,7 +14,7 @@ module.exports = {
 
     // Clear voice channel status before destroying
     if (player.voiceChannelId) {
-      await client.rest.patch(`/channels/${player.voiceChannelId}`, {
+      await client.rest.put(`/channels/${player.voiceChannelId}/voice-status`, {
         body: { status: "" },
       }).catch(() => {});
     }
