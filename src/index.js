@@ -118,19 +118,28 @@ client.lavalink.on("debug", (eventName, eventData) => {
   }
 });
 
-// ── Voice channel status via REST ─────────────────────────────────────────────
+// ── Voice channel status — uses native fetch against Discord REST v10 directly.
+// discord.js's client.rest.patch() wraps the body in a way that Discord accepts
+// but silently ignores for the "status" field on voice channels. Raw fetch works.
 async function setVoiceChannelStatus(channelId, status) {
-  console.log(`[ChannelStatus] channelId=${channelId} status="${status}"`);
-  if (!channelId) {
-    console.warn("[ChannelStatus] No channelId — skipping");
-    return;
-  }
+  if (!channelId) return;
   try {
-    await client.rest.patch(`/channels/${channelId}`, { body: { status } });
-    console.log(`[ChannelStatus] ✅ Done`);
+    const res = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bot ${process.env.DISCORD_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error(`[ChannelStatus] ❌ HTTP ${res.status}:`, JSON.stringify(err));
+    } else {
+      console.log(`[ChannelStatus] ✅ Set "${status}" on channel ${channelId}`);
+    }
   } catch (err) {
-    console.error(`[ChannelStatus] ❌ HTTP ${err.status} code=${err.code}: ${err.message}`);
-    console.error(`[ChannelStatus] ❌ Raw:`, JSON.stringify(err.rawError ?? err));
+    console.error("[ChannelStatus] ❌ fetch failed:", err.message);
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
