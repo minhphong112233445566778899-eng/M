@@ -1,5 +1,6 @@
 const { Client, GatewayIntentBits, Collection, EmbedBuilder } = require("discord.js");
 const { LavalinkManager } = require("lavalink-client");
+const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
 const path = require("path");
 
@@ -316,20 +317,63 @@ client.lavalink.on("queueEnd", (player) => {
   if (channel) channel.send("Queue finished. Use `/play` to add more tracks.");
 });
 
+// Gemini client — only initialised if the env var is set so the bot still
+// works without it (falls back to the old title+author search).
+const gemini = process.env.GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+  : null;
+
+async function getGeminiSuggestion(lastTrack) {
+  if (!gemini) return null;
+  try {
+    const response = await gemini.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `The user just finished listening to "${lastTrack.info.title}" by "${lastTrack.info.author || "Unknown"}". Suggest ONE specific different song they would enjoy next.`,
+      config: {
+        systemInstruction:
+          "You are a music bot DJ. Suggest the next song to play based on the last track. Never suggest the exact same song. Return only JSON.",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            search_string: {
+              type: "STRING",
+              description: "Artist - Song Name to search for on YouTube Music",
+            },
+          },
+          required: ["search_string"],
+        },
+      },
+    });
+    const result = JSON.parse(response.text);
+    console.log(`[Autoplay/Gemini] Suggested: "${result.search_string}"`);
+    return result.search_string;
+  } catch (err) {
+    console.error("[Autoplay/Gemini] Failed:", err.message);
+    return null;
+  }
+}
+
 async function handleAutoplay(player, lastTrack) {
   try {
-    const query = `${lastTrack.info.title} ${lastTrack.info.author || ""}`.trim();
-    console.log(`[Autoplay] Searching for: "${query}"`);
+    // Try Gemini first for a smart suggestion, fall back to plain search
+    let query = await getGeminiSuggestion(lastTrack);
+    if (!query) {
+      query = `${lastTrack.info.title} ${lastTrack.info.author || ""}`.trim();
+      console.log(`[Autoplay] Gemini unavailable, falling back to: "${query}"`);
+    }
+
     const res = await player.search({ query, source: "ytmsearch" }, client.user);
     if (!res?.tracks?.length) {
       console.warn("[Autoplay] Search returned no results.");
       return;
     }
-    // Pick randomly from top 5, but exclude the exact same track
+
+    // Exclude the exact same track
     const candidates = res.tracks
       .slice(0, 5)
       .filter((t) => t.info.identifier !== lastTrack.info.identifier);
-    const track = candidates[Math.floor(Math.random() * candidates.length)] || res.tracks[0];
+    const track = candidates[0] || res.tracks[0];
     console.log(`[Autoplay] Queuing: "${track.info.title}"`);
     player.queue.add(track);
     if (!player.playing) await player.play();

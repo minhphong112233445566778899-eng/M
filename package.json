@@ -9,8 +9,9 @@
     "register": "node -r dotenv/config src/register.js"
   },
   "dependencies": {
+    "@google/genai": "^2.9.0",
     "discord.js": "^14.16.3",
-    "lavalink-client": "^2.4.3",
-    "dotenv": "^16.4.7"
+    "dotenv": "^16.4.7",
+    "lavalink-client": "^2.4.3"
   }
 }
