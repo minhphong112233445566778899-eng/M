@@ -101,7 +101,7 @@ module.exports = {
 // Discord's PATCH /channels/{id} with a "status" field is the correct approach.
 async function setChannelStatus(channel, status) {
   try {
-    await channel.client.rest.patch(`/channels/${channel.id}`, {
+    await channel.client.rest.put(`/channels/${channel.id}/voice-status`, {
       body: { status },
     });
   } catch (err) {
