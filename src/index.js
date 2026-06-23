@@ -1,6 +1,5 @@
 const { Client, GatewayIntentBits, Collection, EmbedBuilder } = require("discord.js");
 const { LavalinkManager } = require("lavalink-client");
-const { GoogleGenAI } = require("@google/genai");
 const fs = require("fs");
 const path = require("path");
 
@@ -118,18 +117,121 @@ client.lavalink.on("debug", (eventName, eventData) => {
   }
 });
 
-// ── Voice channel status — uses native fetch against Discord REST v10 directly.
-// discord.js's client.rest.patch() wraps the body in a way that Discord accepts
-// but silently ignores for the "status" field on voice channels. Raw fetch works.
+// ── Voice channel status ──────────────────────────────────────────────────────
 async function setVoiceChannelStatus(channelId, status) {
   if (!channelId) return;
   try {
-    await client.rest.put(`/channels/${channelId}/voice-status`, {
-      body: { status },
-    });
+    await client.rest.put(`/channels/${channelId}/voice-status`, { body: { status } });
     console.log(`[ChannelStatus] ✅ Set "${status}" on channel ${channelId}`);
   } catch (err) {
     console.error(`[ChannelStatus] ❌ HTTP ${err.status} code=${err.code}: ${err.message}`);
+  }
+}
+
+// ── Spotify Client Credentials ────────────────────────────────────────────────
+let spotifyToken = null;
+let spotifyTokenExpiry = 0;
+
+async function getSpotifyToken() {
+  if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
+
+  const creds = Buffer.from(
+    `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const res = await fetch("https://accounts.spotify.com/api/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${creds}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials",
+  });
+
+  if (!res.ok) throw new Error(`Spotify auth failed: ${res.status}`);
+  const data = await res.json();
+  spotifyToken = data.access_token;
+  spotifyTokenExpiry = Date.now() + (data.expires_in - 60) * 1000; // refresh 1min early
+  console.log("[Spotify] ✅ Token refreshed");
+  return spotifyToken;
+}
+
+// Search Spotify for a track and return its Spotify ID
+async function getSpotifyTrackId(title, author) {
+  const token = await getSpotifyToken();
+  const query = encodeURIComponent(`track:${title} artist:${author || ""}`);
+  const res = await fetch(
+    `https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new Error(`Spotify search failed: ${res.status}`);
+  const data = await res.json();
+  return data.tracks?.items?.[0]?.id ?? null;
+}
+
+// Get Spotify recommendations seeded by a track ID
+async function getSpotifyRecommendations(seedTrackId, excludeId) {
+  const token = await getSpotifyToken();
+  const res = await fetch(
+    `https://api.spotify.com/v1/recommendations?seed_tracks=${seedTrackId}&limit=5`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) throw new Error(`Spotify recommendations failed: ${res.status}`);
+  const data = await res.json();
+
+  // Return tracks excluding the seed itself
+  return (data.tracks ?? [])
+    .filter((t) => t.id !== excludeId)
+    .map((t) => ({
+      title: t.name,
+      artist: t.artists?.[0]?.name ?? "",
+    }));
+}
+
+// Main Spotify autoplay handler
+async function handleAutoplay(player, lastTrack) {
+  try {
+    const title = lastTrack.info.title;
+    const author = lastTrack.info.author || "";
+    console.log(`[Autoplay/Spotify] Seeding from: "${title}" by "${author}"`);
+
+    // Step 1: find the track on Spotify
+    const seedId = await getSpotifyTrackId(title, author);
+    if (!seedId) {
+      console.warn("[Autoplay/Spotify] Track not found on Spotify — skipping autoplay.");
+      return;
+    }
+    console.log(`[Autoplay/Spotify] Seed Spotify ID: ${seedId}`);
+
+    // Step 2: get recommendations
+    const recommendations = await getSpotifyRecommendations(seedId, seedId);
+    if (!recommendations.length) {
+      console.warn("[Autoplay/Spotify] No recommendations returned.");
+      return;
+    }
+
+    // Step 3: try each recommendation until one plays
+    for (const rec of recommendations) {
+      const query = `${rec.title} ${rec.artist}`.trim();
+      console.log(`[Autoplay/Spotify] Trying: "${query}"`);
+
+      const res = await player.search({ query, source: "ytmsearch" }, client.user);
+      if (!res?.tracks?.length) continue;
+
+      // Skip if it's the same track we just played
+      const track = res.tracks.find(
+        (t) => t.info.identifier !== lastTrack.info.identifier
+      ) || res.tracks[0];
+
+      console.log(`[Autoplay/Spotify] Queuing: "${track.info.title}"`);
+      player.queue.add(track);
+      if (!player.playing) await player.play();
+      return;
+    }
+
+    console.warn("[Autoplay/Spotify] All recommendations failed to resolve on YouTube Music.");
+  } catch (err) {
+    console.error("[Autoplay/Spotify] Error:", err.message);
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,9 +326,7 @@ client.lavalink.on("trackError", async (player, track, payload) => {
     client.errorCounts.set(guildId, 0);
     if (channel)
       channel
-        .send(
-          "⚠️ 5 tracks in a row failed to play (likely a YouTube auth/cookie issue on the node). Stopping playback — check the bot logs."
-        )
+        .send("⚠️ 5 tracks in a row failed to play (likely a YouTube auth/cookie issue on the node). Stopping playback — check the bot logs.")
         .catch(() => {});
     await player.stopPlaying(true).catch(() => {});
     return;
@@ -314,67 +414,6 @@ client.lavalink.on("queueEnd", (player) => {
   const channel = client.channels.cache.get(player.textChannelId);
   if (channel) channel.send("Queue finished. Use `/play` to add more tracks.");
 });
-
-const gemini = process.env.GEMINI_API_KEY
-  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
-  : null;
-
-async function getGeminiSuggestion(lastTrack) {
-  if (!gemini) return null;
-  try {
-    const response = await gemini.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `The user just finished listening to "${lastTrack.info.title}" by "${lastTrack.info.author || "Unknown"}". Suggest ONE specific different song they would enjoy next.`,
-      config: {
-        systemInstruction:
-          "You are a music bot DJ. Suggest the next song to play based on the last track. Never suggest the exact same song. Return only JSON.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            search_string: {
-              type: "STRING",
-              description: "Artist - Song Name to search for on YouTube Music",
-            },
-          },
-          required: ["search_string"],
-        },
-      },
-    });
-    const result = JSON.parse(response.text);
-    console.log(`[Autoplay/Gemini] Suggested: "${result.search_string}"`);
-    return result.search_string;
-  } catch (err) {
-    console.error("[Autoplay/Gemini] Failed:", err.message);
-    return null;
-  }
-}
-
-async function handleAutoplay(player, lastTrack) {
-  try {
-    let query = await getGeminiSuggestion(lastTrack);
-    if (!query) {
-      query = `${lastTrack.info.title} ${lastTrack.info.author || ""}`.trim();
-      console.log(`[Autoplay] Gemini unavailable, falling back to: "${query}"`);
-    }
-
-    const res = await player.search({ query, source: "ytmsearch" }, client.user);
-    if (!res?.tracks?.length) {
-      console.warn("[Autoplay] Search returned no results.");
-      return;
-    }
-
-    const candidates = res.tracks
-      .slice(0, 5)
-      .filter((t) => t.info.identifier !== lastTrack.info.identifier);
-    const track = candidates[0] || res.tracks[0];
-    console.log(`[Autoplay] Queuing: "${track.info.title}"`);
-    player.queue.add(track);
-    if (!player.playing) await player.play();
-  } catch (err) {
-    console.error("[Autoplay] Error:", err.message);
-  }
-}
 
 client.on("raw", (d) => {
   if (["VOICE_STATE_UPDATE", "VOICE_SERVER_UPDATE"].includes(d.t)) {
