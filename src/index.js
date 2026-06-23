@@ -118,14 +118,19 @@ client.lavalink.on("debug", (eventName, eventData) => {
   }
 });
 
-// ─── FIX: single shared helper that uses the REST API ────────────────────────
-// discord.js has no channel.setStatus() method — it must be called via REST.
+// ── Voice channel status via REST ─────────────────────────────────────────────
 async function setVoiceChannelStatus(channelId, status) {
+  console.log(`[ChannelStatus] channelId=${channelId} status="${status}"`);
+  if (!channelId) {
+    console.warn("[ChannelStatus] No channelId — skipping");
+    return;
+  }
   try {
     await client.rest.patch(`/channels/${channelId}`, { body: { status } });
-    console.log(`[ChannelStatus] Set "${status}" on channel ${channelId}`);
+    console.log(`[ChannelStatus] ✅ Done`);
   } catch (err) {
-    console.error("[ChannelStatus] Failed to set status:", err.message);
+    console.error(`[ChannelStatus] ❌ HTTP ${err.status} code=${err.code}: ${err.message}`);
+    console.error(`[ChannelStatus] ❌ Raw:`, JSON.stringify(err.rawError ?? err));
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,15 +175,12 @@ function clearNpInterval(guildId) {
 }
 
 client.lavalink.on("trackStart", async (player, track) => {
-  console.log(`[Lavalink] Track started: ${track.info.title} in guild ${player.guildId}`);
+  console.log(`[Lavalink] trackStart: "${track.info.title}" guild=${player.guildId} voiceChannelId=${player.voiceChannelId}`);
   clearNpInterval(player.guildId);
   client.errorCounts.set(player.guildId, 0);
   client.retriedTracks.delete(player.guildId);
 
-  // FIX: auto-set voice channel status using REST (not the non-existent setStatus())
-  if (player.voiceChannelId) {
-    await setVoiceChannelStatus(player.voiceChannelId, `🎵 ${track.info.title}`);
-  }
+  await setVoiceChannelStatus(player.voiceChannelId, `🎵 ${track.info.title}`);
 
   const channel = client.channels.cache.get(player.textChannelId);
   if (!channel) return;
@@ -298,11 +300,7 @@ client.lavalink.on("playerSocketClosed", (player, payload) => {
 
 client.lavalink.on("queueEnd", (player) => {
   clearNpInterval(player.guildId);
-
-  // FIX: clear voice channel status using REST when queue ends
-  if (player.voiceChannelId) {
-    setVoiceChannelStatus(player.voiceChannelId, "");
-  }
+  if (player.voiceChannelId) setVoiceChannelStatus(player.voiceChannelId, "");
 
   if (player.get("autoplay")) {
     const seed = player.queue.previous[0];
