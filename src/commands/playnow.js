@@ -17,19 +17,35 @@ module.exports = {
 
     let player = client.lavalink.getPlayer(interaction.guildId);
     if (!player) {
+      const customNode = client.lavalink.nodeManager.nodes.get("custom");
       player = client.lavalink.createPlayer({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
         textChannelId: interaction.channelId,
         selfDeaf: true,
         selfMute: false,
+        node: customNode?.id ?? "custom",
       });
     }
 
     if (!player.connected) await player.connect();
 
     const query = interaction.options.getString("query");
-    const res = await player.search({ query, source: "ytmsearch" }, interaction.user);
+    const isUrl = /^https?:\/\//.test(query);
+    const searchSource = isUrl ? undefined : "ytmsearch";
+
+    // Use jirayu for search, fallback to player node
+    const searchNode = client.lavalink.nodeManager.nodes.get("jirayu")
+      ?? client.lavalink.nodeManager.leastUsedNodes[0];
+
+    const res = await searchNode
+      .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
+      .catch(async (err) => {
+        console.warn(`[PlayNow] jirayu search failed, falling back:`, err.message);
+        return player
+          .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
+          .catch((e) => { console.error(`[PlayNow] Search error:`, e.message); return null; });
+      });
 
     if (!res || res.loadType === "empty" || res.loadType === "error")
       return interaction.editReply("No results found.");
@@ -52,7 +68,7 @@ module.exports = {
               inline: true,
             }
           )
-          .setThumbnail(track.info.artworkUrl || ""),
+          .setThumbnail(track.info.artworkUrl || null),
       ],
     });
   },
