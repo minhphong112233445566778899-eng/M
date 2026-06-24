@@ -23,12 +23,15 @@ module.exports = {
     const isNew = !player;
 
     if (!player) {
+      // Use our own Railway node for playback
+      const customNode = client.lavalink.nodeManager.nodes.get("custom");
       player = client.lavalink.createPlayer({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
         textChannelId: interaction.channelId,
         selfDeaf: true,
         selfMute: false,
+        node: customNode?.id ?? "custom",
       });
     }
 
@@ -46,11 +49,18 @@ module.exports = {
 
     console.log(`[Play] Searching: "${query}" source=${searchSource || "auto"}`);
 
-    const res = await player
+    // Use jirayu node for searching — more stable for resolving tracks
+    const searchNode = client.lavalink.nodeManager.nodes.get("jirayu")
+      ?? client.lavalink.nodeManager.leastUsedNodes[0];
+
+    const res = await searchNode
       .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
-      .catch((err) => {
-        console.error(`[Play] Search error:`, err.message || err);
-        return null;
+      .catch(async (err) => {
+        console.warn(`[Play] jirayu search failed, falling back to player search:`, err.message);
+        // Fallback to player's own node if jirayu is down
+        return player
+          .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
+          .catch((e) => { console.error(`[Play] Search error:`, e.message); return null; });
       });
 
     console.log(`[Play] Search result: loadType=${res?.loadType}, tracks=${res?.tracks?.length}`);
