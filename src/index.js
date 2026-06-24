@@ -271,7 +271,7 @@ function buildNowPlayingEmbed(player, track) {
       { name: "Requested By", value: track.requester?.username || "Unknown", inline: true },
       { name: "Progress", value: bar }
     )
-    .setThumbnail(track.info.artworkUrl || "");
+    .setThumbnail(track.info.artworkUrl || null);
 }
 
 function clearNpInterval(guildId) {
