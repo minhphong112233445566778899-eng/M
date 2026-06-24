@@ -34,17 +34,11 @@ module.exports = {
     const isUrl = /^https?:\/\//.test(query);
     const searchSource = isUrl ? undefined : "ytmsearch";
 
-    // Use jirayu for search, fallback to player node
-    const searchNode = client.lavalink.nodeManager.nodes.get("jirayu")
-      ?? client.lavalink.nodeManager.leastUsedNodes[0];
-
-    const res = await searchNode
+    const res = await player
       .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
-      .catch(async (err) => {
-        console.warn(`[PlayNow] jirayu search failed, falling back:`, err.message);
-        return player
-          .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
-          .catch((e) => { console.error(`[PlayNow] Search error:`, e.message); return null; });
+      .catch((err) => {
+        console.error(`[PlayNow] Search error:`, err.message || err);
+        return null;
       });
 
     if (!res || res.loadType === "empty" || res.loadType === "error")
