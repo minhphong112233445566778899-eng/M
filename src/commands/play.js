@@ -87,7 +87,7 @@ module.exports = {
                 inline: true,
               }
             )
-            .setThumbnail(track.info.artworkUrl || ""),
+            .setThumbnail(track.info.artworkUrl || null),
         ],
       });
     }
