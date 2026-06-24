@@ -205,7 +205,20 @@ async function handleAutoplay(player, lastTrack) {
     // Step 1: find the track on Spotify
     const seedId = await getSpotifyTrackId(title, author);
     if (!seedId) {
-      console.warn("[Autoplay/Spotify] Track not found on Spotify — skipping autoplay.");
+      console.warn("[Autoplay/Spotify] Track not found on Spotify — falling back to YTM search.");
+      // Fallback: just search for a related song by title+author on YouTube Music
+      const fallbackRes = await player.search(
+        { query: `${title} ${author}`.trim(), source: "ytmsearch" },
+        client.user
+      );
+      if (fallbackRes?.tracks?.length) {
+        const fallback = fallbackRes.tracks.find(
+          (t) => t.info.identifier !== lastTrack.info.identifier
+        ) || fallbackRes.tracks[1] || fallbackRes.tracks[0];
+        console.log(`[Autoplay/Fallback] Queuing: "${fallback.info.title}"`);
+        player.queue.add(fallback);
+        if (!player.playing) await player.play();
+      }
       return;
     }
     console.log(`[Autoplay/Spotify] Seed Spotify ID: ${seedId}`);
@@ -287,6 +300,8 @@ client.lavalink.on("trackStart", async (player, track) => {
   clearNpInterval(player.guildId);
   client.errorCounts.set(player.guildId, 0);
   client.retriedTracks.delete(player.guildId);
+  // Save last played track so queueEnd can seed autoplay reliably
+  player.set("lastTrack", track);
 
   await setVoiceChannelStatus(player.voiceChannelId, `🎵 ${track.info.title}`);
 
@@ -409,7 +424,8 @@ client.lavalink.on("queueEnd", (player) => {
   if (player.voiceChannelId) setVoiceChannelStatus(player.voiceChannelId, "");
 
   if (player.get("autoplay")) {
-    const seed = player.queue.previous[0];
+    // Use saved lastTrack first — queue.previous can be empty when queueEnd fires
+    const seed = player.get("lastTrack") || player.queue.previous[0];
     console.log(`[Autoplay] queueEnd fired, seed track: ${seed?.info?.title || "NONE"}`);
     if (seed) {
       handleAutoplay(player, seed);
