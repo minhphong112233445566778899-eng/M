@@ -123,123 +123,49 @@ async function setVoiceChannelStatus(channelId, status) {
   }
 }
 
-// ── Spotify Client Credentials ────────────────────────────────────────────────
-let spotifyToken = null;
-let spotifyTokenExpiry = 0;
-
-async function getSpotifyToken() {
-  if (spotifyToken && Date.now() < spotifyTokenExpiry) return spotifyToken;
-
-  const creds = Buffer.from(
-    `${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`
-  ).toString("base64");
-
-  const res = await fetch("https://accounts.spotify.com/api/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${creds}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: "grant_type=client_credentials",
-  });
-
-  if (!res.ok) throw new Error(`Spotify auth failed: ${res.status}`);
-  const data = await res.json();
-  spotifyToken = data.access_token;
-  spotifyTokenExpiry = Date.now() + (data.expires_in - 60) * 1000; // refresh 1min early
-  console.log("[Spotify] ✅ Token refreshed");
-  return spotifyToken;
-}
-
-// Search Spotify for a track and return its Spotify ID
-async function getSpotifyTrackId(title, author) {
-  const token = await getSpotifyToken();
-  const query = encodeURIComponent(`track:${title} artist:${author || ""}`);
-  const res = await fetch(
-    `https://api.spotify.com/v1/search?q=${query}&type=track&limit=1`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) throw new Error(`Spotify search failed: ${res.status}`);
-  const data = await res.json();
-  return data.tracks?.items?.[0]?.id ?? null;
-}
-
-// Get Spotify recommendations seeded by a track ID
-async function getSpotifyRecommendations(seedTrackId, excludeId) {
-  const token = await getSpotifyToken();
-  const res = await fetch(
-    `https://api.spotify.com/v1/recommendations?seed_tracks=${seedTrackId}&limit=5`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) throw new Error(`Spotify recommendations failed: ${res.status}`);
-  const data = await res.json();
-
-  // Return tracks excluding the seed itself
-  return (data.tracks ?? [])
-    .filter((t) => t.id !== excludeId)
-    .map((t) => ({
-      title: t.name,
-      artist: t.artists?.[0]?.name ?? "",
-    }));
-}
-
-// Main Spotify autoplay handler
+// ── Autoplay ──────────────────────────────────────────────────────────────────
+// Uses YouTube's "radio" mix (the RD<videoId> playlist) to find related tracks.
+// Needs no external API keys, and does NOT depend on Spotify's removed
+// /v1/recommendations endpoint (Spotify shut that down in Nov 2024 — it was the
+// reason autoplay silently did nothing before).
 async function handleAutoplay(player, lastTrack) {
   try {
-    const title = lastTrack.info.title;
-    const author = lastTrack.info.author || "";
-    console.log(`[Autoplay/Spotify] Seeding from: "${title}" by "${author}"`);
+    const id = lastTrack.info.identifier;
+    const requester = lastTrack.requester || client.user;
+    console.log(`[Autoplay] Seeding YouTube radio from: "${lastTrack.info.title}"`);
 
-    // Step 1: find the track on Spotify
-    const seedId = await getSpotifyTrackId(title, author);
-    if (!seedId) {
-      console.warn("[Autoplay/Spotify] Track not found on Spotify — falling back to YTM search.");
-      // Fallback: just search for a related song by title+author on YouTube Music
-      const fallbackRes = await player.search(
-        { query: `${title} ${author}`.trim(), source: "ytmsearch" },
-        client.user
-      );
-      if (fallbackRes?.tracks?.length) {
-        const fallback = fallbackRes.tracks.find(
-          (t) => t.info.identifier !== lastTrack.info.identifier
-        ) || fallbackRes.tracks[1] || fallbackRes.tracks[0];
-        console.log(`[Autoplay/Fallback] Queuing: "${fallback.info.title}"`);
-        player.queue.add(fallback);
-        if (!player.playing) await player.play();
-      }
-      return;
-    }
-    console.log(`[Autoplay/Spotify] Seed Spotify ID: ${seedId}`);
+    const res = await player.search(
+      {
+        query: `https://www.youtube.com/watch?v=${id}&list=RD${id}`,
+        source: "youtube",
+      },
+      requester
+    );
 
-    // Step 2: get recommendations
-    const recommendations = await getSpotifyRecommendations(seedId, seedId);
-    if (!recommendations.length) {
-      console.warn("[Autoplay/Spotify] No recommendations returned.");
+    if (!res?.tracks?.length) {
+      console.warn("[Autoplay] No related tracks found.");
       return;
     }
 
-    // Step 3: try each recommendation until one plays
-    for (const rec of recommendations) {
-      const query = `${rec.title} ${rec.artist}`.trim();
-      console.log(`[Autoplay/Spotify] Trying: "${query}"`);
+    // Drop the seed itself and anything already played recently.
+    const playedIds = new Set(
+      (player.queue.previous || []).map((t) => t.info.identifier)
+    );
+    const next = res.tracks.filter(
+      (t) => t.info.identifier !== id && !playedIds.has(t.info.identifier)
+    );
 
-      const res = await player.search({ query, source: "ytmsearch" }, client.user);
-      if (!res?.tracks?.length) continue;
-
-      // Skip if it's the same track we just played
-      const track = res.tracks.find(
-        (t) => t.info.identifier !== lastTrack.info.identifier
-      ) || res.tracks[0];
-
-      console.log(`[Autoplay/Spotify] Queuing: "${track.info.title}"`);
-      player.queue.add(track);
-      if (!player.playing) await player.play();
+    if (!next.length) {
+      console.warn("[Autoplay] Only duplicates returned — skipping.");
       return;
     }
 
-    console.warn("[Autoplay/Spotify] All recommendations failed to resolve on YouTube Music.");
+    const toQueue = next.slice(0, 5);
+    console.log(`[Autoplay] Queuing ${toQueue.length} related tracks.`);
+    await player.queue.add(toQueue);
+    if (!player.playing) await player.play();
   } catch (err) {
-    console.error("[Autoplay/Spotify] Error:", err.message);
+    console.error("[Autoplay] Error:", err.message);
   }
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -272,7 +198,7 @@ function buildNowPlayingEmbed(player, track) {
       { name: "Requested By", value: track.requester?.username || "Unknown", inline: true },
       { name: "Progress", value: bar }
     )
-    .setThumbnail(track.info.artworkUrl || null);
+    .setThumbnail(track.info.artworkUrl || "");
 }
 
 function clearNpInterval(guildId) {
@@ -288,8 +214,6 @@ client.lavalink.on("trackStart", async (player, track) => {
   clearNpInterval(player.guildId);
   client.errorCounts.set(player.guildId, 0);
   client.retriedTracks.delete(player.guildId);
-  // Save last played track so queueEnd can seed autoplay reliably
-  player.set("lastTrack", track);
 
   await setVoiceChannelStatus(player.voiceChannelId, `🎵 ${track.info.title}`);
 
@@ -412,8 +336,8 @@ client.lavalink.on("queueEnd", (player) => {
   if (player.voiceChannelId) setVoiceChannelStatus(player.voiceChannelId, "");
 
   if (player.get("autoplay")) {
-    // Use saved lastTrack first — queue.previous can be empty when queueEnd fires
-    const seed = player.get("lastTrack") || player.queue.previous[0];
+    // The just-finished track is the most recent entry in previous[].
+    const seed = player.queue.previous[0];
     console.log(`[Autoplay] queueEnd fired, seed track: ${seed?.info?.title || "NONE"}`);
     if (seed) {
       handleAutoplay(player, seed);
