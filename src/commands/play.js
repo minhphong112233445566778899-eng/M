@@ -49,18 +49,13 @@ module.exports = {
 
     console.log(`[Play] Searching: "${query}" source=${searchSource || "auto"}`);
 
-    // Use jirayu node for searching — more stable for resolving tracks
-    const searchNode = client.lavalink.nodeManager.nodes.get("jirayu")
-      ?? client.lavalink.nodeManager.leastUsedNodes[0];
-
-    const res = await searchNode
+    // Search via jirayu, but always resolve/play through the player's own node (custom)
+    // so track encoded data matches the node that will actually play it
+    const res = await player
       .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
-      .catch(async (err) => {
-        console.warn(`[Play] jirayu search failed, falling back to player search:`, err.message);
-        // Fallback to player's own node if jirayu is down
-        return player
-          .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
-          .catch((e) => { console.error(`[Play] Search error:`, e.message); return null; });
+      .catch((err) => {
+        console.error(`[Play] Search error:`, err.message || err);
+        return null;
       });
 
     console.log(`[Play] Search result: loadType=${res?.loadType}, tracks=${res?.tracks?.length}`);
