@@ -43,7 +43,7 @@ client.lavalink = new LavalinkManager({
 
     {
       id: "custom",
-      host: "lavalink-2026-production-dd3d.up.railway.app",
+      host: "lavalink-production-7142.up.railway.app",
       port: 443,
       authorization: "Minh@2013",
       secure: true,
