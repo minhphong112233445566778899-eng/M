@@ -23,15 +23,21 @@ module.exports = {
     const isNew = !player;
 
     if (!player) {
-      // Use our own Railway node for playback
-      const customNode = client.lavalink.nodeManager.nodes.get("custom");
+      // Pick the least loaded connected node between custom and jirayu
+      const nodes = ["custom", "jirayu"]
+        .map(id => client.lavalink.nodeManager.nodes.get(id))
+        .filter(n => n?.connected);
+      const bestNode = nodes.sort((a, b) =>
+        (a.stats?.playingPlayers ?? 999) - (b.stats?.playingPlayers ?? 999)
+      )[0];
+      console.log(`[Play] Using node: ${bestNode?.id ?? "auto"}`);
       player = client.lavalink.createPlayer({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
         textChannelId: interaction.channelId,
         selfDeaf: true,
         selfMute: false,
-        node: customNode?.id ?? "custom",
+        node: bestNode?.id,
       });
     }
 
@@ -49,8 +55,6 @@ module.exports = {
 
     console.log(`[Play] Searching: "${query}" source=${searchSource || "auto"}`);
 
-    // Search via jirayu, but always resolve/play through the player's own node (custom)
-    // so track encoded data matches the node that will actually play it
     const res = await player
       .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
       .catch((err) => {
