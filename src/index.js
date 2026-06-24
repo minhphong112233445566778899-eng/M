@@ -40,19 +40,7 @@ client.lavalink = new LavalinkManager({
       heartBeatInterval: 30000,     // ping node every 30s to keep connection alive
       enablePingOnStatsCheck: true, // verify node is reachable before sending requests
     },
-
-    {
-      id: "custom",
-      host: "lavalink2-production-90b8.up.railway.app",
-      port: 443,
-      authorization: "Minh@2013",
-      secure: true,
-      retryAmount: 10,
-      retryDelay: 5000,
-      requestSignalTimeoutMS: 30000,
-      heartBeatInterval: 30000,
-      enablePingOnStatsCheck: true,
-    },
+    
   ],
   sendToShard: (guildId, payload) => {
     const guild = client.guilds.cache.get(guildId);
