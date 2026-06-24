@@ -17,19 +17,12 @@ module.exports = {
 
     let player = client.lavalink.getPlayer(interaction.guildId);
     if (!player) {
-      const nodes = ["custom", "jirayu"]
-        .map(id => client.lavalink.nodeManager.nodes.get(id))
-        .filter(n => n?.connected);
-      const bestNode = nodes.sort((a, b) =>
-        (a.stats?.playingPlayers ?? 999) - (b.stats?.playingPlayers ?? 999)
-      )[0];
       player = client.lavalink.createPlayer({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
         textChannelId: interaction.channelId,
         selfDeaf: true,
         selfMute: false,
-        node: bestNode?.id,
       });
     }
 
@@ -59,7 +52,7 @@ module.exports = {
               inline: true,
             }
           )
-          .setThumbnail(track.info.artworkUrl || null),
+          .setThumbnail(track.info.artworkUrl || ""),
       ],
     });
   },
