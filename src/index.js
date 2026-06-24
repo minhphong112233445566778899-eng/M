@@ -40,18 +40,7 @@ client.lavalink = new LavalinkManager({
       heartBeatInterval: 30000,     // ping node every 30s to keep connection alive
       enablePingOnStatsCheck: true, // verify node is reachable before sending requests
     },
-    {
-      id: "serenetia",
-      host: "lavalinkv4.serenetia.com",
-      port: 443,
-      authorization: "https://dsc.gg/serenetia-music",
-      secure: true,
-      retryAmount: 20,
-      retryDelay: 2500,
-      requestSignalTimeoutMS: 30000,
-      heartBeatInterval: 30000,
-      enablePingOnStatsCheck: true,
-    },
+
     {
       id: "custom",
       host: "lavalink-2026-production-dd3d.up.railway.app",
