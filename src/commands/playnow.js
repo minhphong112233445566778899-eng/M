@@ -17,29 +17,26 @@ module.exports = {
 
     let player = client.lavalink.getPlayer(interaction.guildId);
     if (!player) {
-      const customNode = client.lavalink.nodeManager.nodes.get("custom");
+      const nodes = ["custom", "jirayu"]
+        .map(id => client.lavalink.nodeManager.nodes.get(id))
+        .filter(n => n?.connected);
+      const bestNode = nodes.sort((a, b) =>
+        (a.stats?.playingPlayers ?? 999) - (b.stats?.playingPlayers ?? 999)
+      )[0];
       player = client.lavalink.createPlayer({
         guildId: interaction.guildId,
         voiceChannelId: voiceChannel.id,
         textChannelId: interaction.channelId,
         selfDeaf: true,
         selfMute: false,
-        node: customNode?.id ?? "custom",
+        node: bestNode?.id,
       });
     }
 
     if (!player.connected) await player.connect();
 
     const query = interaction.options.getString("query");
-    const isUrl = /^https?:\/\//.test(query);
-    const searchSource = isUrl ? undefined : "ytmsearch";
-
-    const res = await player
-      .search(isUrl ? { query } : { query, source: searchSource }, interaction.user)
-      .catch((err) => {
-        console.error(`[PlayNow] Search error:`, err.message || err);
-        return null;
-      });
+    const res = await player.search({ query, source: "ytmsearch" }, interaction.user);
 
     if (!res || res.loadType === "empty" || res.loadType === "error")
       return interaction.editReply("No results found.");
